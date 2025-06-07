@@ -1,6 +1,15 @@
 {
-  "type": "module",
+  "name": "new-improved-gmail-tool",
+  "version": "1.0.0",
+  "description": "Gmail unlock tool with Redis-based access code validation via Upstash on Vercel",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "node api/verify-code.js"
+  },
   "dependencies": {
-    "node-fetch": "^3.3.2"
-  }
+    "@upstash/redis": "^1.22.2"
+  },
+  "keywords": ["gmail", "dot trick", "access code", "redis", "vercel", "upstash"],
+  "author": "coinmaster202",
+  "license": "MIT"
 }
