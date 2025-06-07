@@ -5,20 +5,24 @@ import { fileURLToPath } from "url";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Required for __dirname in ES modules
+// __dirname workaround for ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Serve static frontend files (like index.html)
+// Parse JSON
+app.use(express.json());
+
+// Serve static HTML from /public
 app.use(express.static(path.join(__dirname, "../public")));
 
-// Your API routes
-app.use("/api", (await import("./verify-code.js")).default);
-
-// Handle root /
+// Serve index.html at root
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/index.html"));
 });
+
+// API route
+import verifyCodeRoute from "./verify-code.js";
+app.use("/api/verify-code", verifyCodeRoute);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
