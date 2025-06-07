@@ -1,6 +1,8 @@
 let requestedPrefix = "";
+let variationLimit = Infinity;
 let latestVariations = [];
 
+// 🔓 Request unlock code via Telegram
 function requestCode(prefix) {
   requestedPrefix = prefix;
   const randomId = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -20,12 +22,21 @@ function requestCode(prefix) {
     .catch(() => showStatus("❌ Failed to contact Telegram"));
 }
 
-function verifyCode() {
+// ✅ Verify unlock code and get variation limit
+async function verifyCode() {
   const code = document.getElementById("code").value.trim().toLowerCase();
-  if (!code.startsWith(requestedPrefix)) {
-    return showStatus("❌ Invalid code for selected mode");
-  }
+  if (!code.includes("-")) return showStatus("❌ Invalid code");
 
+  const res = await fetch("/api/verify-code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code })
+  });
+
+  const data = await res.json();
+  if (!res.ok) return showStatus(`❌ ${data.error || 'Code rejected'}`);
+
+  variationLimit = data.max;
   document.getElementById("unlock-screen").style.display = "none";
   document.getElementById("unlocked-panel").style.display = "block";
 }
@@ -34,7 +45,7 @@ function showStatus(msg) {
   document.getElementById("status").textContent = msg;
 }
 
-// === Tabs ===
+// ✅ Tab switching
 document.querySelectorAll('.tab').forEach(tab => {
   tab.onclick = () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -44,7 +55,7 @@ document.querySelectorAll('.tab').forEach(tab => {
   };
 });
 
-// === Gmail Generator Auto Update ===
+// 🧠 Gmail variation generator
 document.getElementById("gmail-base").addEventListener("input", () => {
   const input = document.getElementById("gmail-base").value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!input) {
@@ -55,10 +66,12 @@ document.getElementById("gmail-base").addEventListener("input", () => {
   }
 
   const total = Math.pow(2, input.length - 1);
-  document.getElementById("variation-count").textContent = `Possibilities: ${total}`;
+  const limit = Math.min(total, variationLimit || Infinity);
+  document.getElementById("variation-count").textContent = `Possibilities: ${limit}`;
 
   const emails = new Set();
-  for (let i = 1; i < total; i++) {
+  let count = 0;
+  for (let i = 1; i < total && count < limit; i++) {
     let combo = "";
     for (let j = 0; j < input.length; j++) {
       combo += input[j];
@@ -66,13 +79,18 @@ document.getElementById("gmail-base").addEventListener("input", () => {
         combo += ".";
       }
     }
-    emails.add(combo + "@gmail.com");
+    const email = combo + "@gmail.com";
+    if (!emails.has(email)) {
+      emails.add(email);
+      count++;
+    }
   }
 
   latestVariations = Array.from(emails);
   document.getElementById("variation-list").innerHTML = latestVariations.map(e => `<li>${e}</li>`).join("");
 });
 
+// 💾 Download variations
 function downloadVariations() {
   const format = document.getElementById("format-select").value;
   if (!latestVariations.length) return alert("No variations to download.");
@@ -98,7 +116,7 @@ function downloadVariations() {
   }
 }
 
-// === CSV Converter ===
+// 📁 CSV Converter
 function downloadCSV() {
   const data = document.getElementById("csv-input").value.trim().split(/\r?\n/).filter(x => x.includes("@"));
   if (!data.length) return alert("No valid emails to export.");
@@ -109,7 +127,7 @@ function downloadCSV() {
   a.click();
 }
 
-// === Duplicate Checker ===
+// 🧹 Duplicate Checker
 function checkDuplicates() {
   const input = document.getElementById("dupe-input").value.trim().split(/\r?\n/);
   const seen = new Set();
@@ -123,7 +141,7 @@ function checkDuplicates() {
   document.getElementById("dupe-result").innerHTML = result || "<li>No duplicates found.</li>";
 }
 
-// === File Loader ===
+// 📂 File import for CSV / Duplicates
 function loadFile(type, event) {
   const reader = new FileReader();
   reader.onload = function () {
