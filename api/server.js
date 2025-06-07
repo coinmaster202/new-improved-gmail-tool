@@ -1,15 +1,25 @@
 import express from "express";
-import dotenv from "dotenv";
-import verifyCodeHandler from "./verify-code.js";
+import path from "path";
+import { fileURLToPath } from "url";
 
-dotenv.config();
 const app = express();
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+// Required for __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-app.post("/api/verify-code", verifyCodeHandler);
+// Serve static frontend files (like index.html)
+app.use(express.static(path.join(__dirname, "../public")));
 
-app.listen(port, () => {
-  console.log(`🚀 Server running at http://localhost:${port}`);
+// Your API routes
+app.use("/api", (await import("./verify-code.js")).default);
+
+// Handle root /
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "../public/index.html"));
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
