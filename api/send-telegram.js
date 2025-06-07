@@ -1,8 +1,9 @@
-import fetch from 'node-fetch';
+import express from "express";
+import fetch from "node-fetch";
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).end("Method not allowed");
+const router = express.Router();
 
+router.post("/", async (req, res) => {
   const { message } = req.body;
   if (!message) return res.status(400).json({ error: "Missing message" });
 
@@ -27,4 +28,6 @@ export default async function handler(req, res) {
     console.error("Telegram error:", err);
     res.status(500).json({ error: err.message || "Telegram error" });
   }
-}
+});
+
+export default router;
