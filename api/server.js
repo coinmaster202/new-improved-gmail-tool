@@ -1,6 +1,6 @@
 import express from "express";
 import dotenv from "dotenv";
-import verifyCodeHandler from "./api/verify-code.js";
+import verifyCodeHandler from "./verify-code.js";
 
 dotenv.config();
 const app = express();
