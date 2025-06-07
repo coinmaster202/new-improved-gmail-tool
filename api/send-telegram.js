@@ -1,33 +1,42 @@
-import express from "express";
-import fetch from "node-fetch";
+import fetch from 'node-fetch';
 
-const router = express.Router();
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
 
-router.post("/", async (req, res) => {
   const { message } = req.body;
-  if (!message) return res.status(400).json({ error: "Missing message" });
 
-  const token = "8146635109:AAFsEogsTVSKvMH-T2xtCZqPh7f9F4Ohwp0";
-  const chatId = "6630390831";
+  if (!message || typeof message !== 'string') {
+    return res.status(400).json({ error: 'Missing or invalid message' });
+  }
+
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (!token || !chatId) {
+    return res.status(500).json({ error: 'Missing Telegram config in environment' });
+  }
 
   try {
     const telegramRes = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        text: message
-      })
+        text: message,
+      }),
     });
 
     const data = await telegramRes.json();
-    if (!data.ok) throw new Error(data.description);
 
-    res.status(200).json({ success: true });
+    if (!data.ok) {
+      throw new Error(data.description || 'Telegram API Error');
+    }
+
+    res.status(200).json({ success: true, message: 'Sent to Telegram' });
   } catch (err) {
-    console.error("Telegram error:", err);
-    res.status(500).json({ error: err.message || "Telegram error" });
+    console.error('Telegram error:', err);
+    res.status(500).json({ error: 'Telegram send failed' });
   }
-});
-
-export default router;
+}
