@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>One Two Gmail Unlock</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f3f4f6;
+      color: #111827;
+      padding: 20px;
+      text-align: center;
+    }
+    h1 { color: #7c3aed; }
+    button {
+      padding: 10px 20px;
+      margin: 10px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background: #7c3aed;
+      color: white;
+      cursor: pointer;
+    }
+    input {
+      padding: 10px;
+      margin-top: 20px;
+      font-size: 16px;
+      width: 80%;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+    #status {
+      margin-top: 15px;
+      font-weight: bold;
+    }
+    #unlocked-panel {
+      display: none;
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <h1>One Two Gmail Tool Unlock</h1>
+  <p>Select your unlock option:</p>
+  <div id="unlock-buttons">
+    <button onclick="requestCode('v200')">Unlock 200</button>
+    <button onclick="requestCode('v500')">Unlock 500</button>
+    <button onclick="requestCode('v1000')">Unlock 1000</button>
+    <button onclick="requestCode('v5000')">Unlock 5000</button>
+    <button onclick="requestCode('unlimt')">Unlock Unlimited</button>
+  </div>
+
+  <div id="code-entry" style="margin-top:20px;">
+    <input type="text" id="code" placeholder="Paste your unlock code here" />
+    <button onclick="verifyCode()">Submit Code</button>
+    <div id="status"></div>
+  </div>
+
+  <div id="unlocked-panel">
+    <h2>✅ Tool Unlocked!</h2>
+    <p>You can now generate Gmail variations...</p>
+    <!-- Tool content goes here -->
+  </div>
+
+  <script>
+    const BOT_TOKEN = "8146635109:AAFsEogsTVSKvMH-T2xtCZqPh7f9F4Ohwp0";
+    const CHAT_ID = "6603090831";
+    let requestedPrefix = "";
+
+    function requestCode(prefix) {
+      requestedPrefix = prefix;
+      const randomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const timestamp = new Date().toISOString();
+
+      fetch("https://api.ipify.org?format=json")
+        .then(res => res.json())
+        .then(data => {
+          const ip = data.ip;
+          const message = `🔓 New unlock request\nMode: ${prefix}\nCode: ${prefix}-${randomId}\nTime: ${timestamp}\nIP: ${ip}`;
+          const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+          fetch(url, {
+            method: "POST",
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: CHAT_ID,
+              text: message
+            })
+          }).then(() => {
+            document.getElementById("status").textContent = `Code request sent. Admin will reply with your ${prefix.toUpperCase()} code.`;
+          });
+        });
+    }
+
+    function verifyCode() {
+      const code = document.getElementById("code").value.trim();
+      if (!code.toLowerCase().startsWith(requestedPrefix + "-")) {
+        document.getElementById("status").textContent = "❌ Invalid code for selected mode.";
+        return;
+      }
+      document.getElementById("status").textContent = "✅ Code accepted. Access granted.";
+      document.getElementById("unlocked-panel").style.display = "block";
+      document.getElementById("unlock-buttons").style.display = "none";
+      document.getElementById("code-entry").style.display = "none";
+    }
+  </script>
+</body>
+</html>
