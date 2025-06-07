@@ -6,7 +6,7 @@ const redis = new Redis({
 });
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
 
   const { code } = req.body;
   if (!code || typeof code !== "string" || !code.includes("-")) {
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     const exists = await redis.get(code);
     if (exists) return res.status(403).json({ error: "Code already used" });
 
-    await redis.set(code, true); // mark as used
+    await redis.set(code, true);
     return res.status(200).json({ max: limits[prefix] });
   } catch (e) {
     console.error("Redis error:", e);
