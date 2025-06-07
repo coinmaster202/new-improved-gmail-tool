@@ -1,32 +1,26 @@
 import TelegramBot from "node-telegram-bot-api";
 import { Redis } from "@upstash/redis";
+import fetch from "node-fetch";
 import csvParser from "csv-parser";
 import https from "https";
 import fs from "fs";
 
-// ✅ Your bot token and Redis setup (use Railway env vars)
+// ENV-style config (loaded from Railway variables)
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-// ✅ Restrict to your Telegram user
-const ALLOWED_USERS = ["6630390831"]; // <- Replace with your Telegram user ID
-
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+
+const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"];
 
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
-  const userId = msg.from.id.toString();
-
-  if (!ALLOWED_USERS.includes(userId)) {
-    bot.sendMessage(chatId, "🚫 You're not allowed to upload codes.");
-    return;
-  }
 
   if (!msg.document || !msg.document.file_name.endsWith(".csv")) {
-    bot.sendMessage(chatId, "📎 Please send a valid .csv file.");
+    bot.sendMessage(chatId, "📎 Please send a valid .csv file with `mode,code` headers.");
     return;
   }
 
@@ -51,28 +45,23 @@ bot.on("message", async (msg) => {
 async function insertCodesFromCSV(filePath, chatId) {
   return new Promise((resolve) => {
     let count = 0;
-    const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"];
-
     fs.createReadStream(filePath)
-      .pipe(csvParser({ headers: false }))
+      .pipe(csvParser()) // Parses CSV with headers like 'mode','code'
       .on("data", async (row) => {
-        const code = Object.values(row)[0]?.toLowerCase().trim();
-        const [prefix, suffix] = code.split("-");
+        const prefix = row.mode?.trim().toLowerCase();
+        const suffix = row.code?.trim().toUpperCase();
+        const code = `${prefix}-${suffix}`;
+
         if (validPrefixes.includes(prefix) && suffix?.length === 6) {
           try {
             const exists = await redis.get(code);
             if (!exists) {
               await redis.set(code, true);
-              console.log(`✅ Inserted: ${code}`);
               count++;
-            } else {
-              console.log(`⚠️ Skipped duplicate: ${code}`);
             }
           } catch (err) {
-            console.error("Redis error:", err);
+            console.error("Redis insert failed:", code, err.message);
           }
-        } else {
-          console.log(`❌ Invalid format: ${code}`);
         }
       })
       .on("end", () => {
