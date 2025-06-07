@@ -5,66 +5,64 @@ import csvParser from "csv-parser";
 import https from "https";
 import fs from "fs";
 
-// Set your config here
-const TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN";
+// Replace with your actual Railway variables or keep using Railway env vars
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const redis = new Redis({
-  url: "YOUR_UPSTASH_REDIS_REST_URL",
-  token: "YOUR_UPSTASH_REDIS_REST_TOKEN",
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
-// Valid prefixes and code format
 const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"];
 
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
 
   if (!msg.document || !msg.document.file_name.endsWith(".csv")) {
-    bot.sendMessage(chatId, "📎 Please send a valid .csv file containing unlock codes.");
-    return;
+    return bot.sendMessage(chatId, "📎 Please upload a .csv file with mode and code columns.");
   }
 
   const fileId = msg.document.file_id;
   const file = await bot.getFile(fileId);
   const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+  const tempPath = `./upload-${Date.now()}.csv`;
 
-  const tempPath = `./temp-${Date.now()}.csv`;
-  const fileStream = fs.createWriteStream(tempPath);
-
+  const stream = fs.createWriteStream(tempPath);
   https.get(fileUrl, (res) => {
-    res.pipe(fileStream);
-    fileStream.on("finish", async () => {
-      fileStream.close();
-      const inserted = await insertCodesFromCSV(tempPath, chatId);
+    res.pipe(stream);
+    stream.on("finish", async () => {
+      stream.close();
+      const total = await processCsv(tempPath, chatId);
       fs.unlinkSync(tempPath);
-      bot.sendMessage(chatId, `✅ Done! ${inserted} valid codes were added.`);
+      bot.sendMessage(chatId, `✅ Upload complete! ${total} new codes added to Redis.`);
     });
   });
 });
 
-async function insertCodesFromCSV(filePath, chatId) {
+async function processCsv(filePath, chatId) {
   return new Promise((resolve) => {
     let count = 0;
+
     fs.createReadStream(filePath)
-      .pipe(csvParser({ headers: false }))
+      .pipe(csvParser())
       .on("data", async (row) => {
-        const code = Object.values(row)[0]?.toLowerCase().trim();
-        const [prefix, suffix] = code.split("-");
-        if (validPrefixes.includes(prefix) && suffix?.length === 6) {
-          try {
-            const exists = await redis.get(code);
-            if (!exists) {
-              await redis.set(code, true);
-              count++;
-            }
-          } catch (err) {
-            console.error("Redis error for", code, err);
+        const mode = row.mode?.toLowerCase().trim();
+        const code = row.code?.trim();
+
+        if (!validPrefixes.includes(mode)) return;
+        if (!code?.startsWith(mode + "-") || code.length < 10) return;
+
+        try {
+          const exists = await redis.get(code);
+          if (!exists) {
+            await redis.set(code, true);
+            count++;
           }
+        } catch (err) {
+          console.error("Redis insert error:", err);
         }
       })
-      .on("end", () => {
-        resolve(count);
-      });
+      .on("end", () => resolve(count));
   });
 }
