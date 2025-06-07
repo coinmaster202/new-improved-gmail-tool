@@ -1,7 +1,11 @@
+import fetch from 'node-fetch';
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end("Method not allowed");
 
   const { message } = req.body;
+  if (!message) return res.status(400).json({ error: "Missing message" });
+
   const token = "8146635109:AAFsEogsTVSKvMH-T2xtCZqPh7f9F4Ohwp0";
   const chatId = "6603090831";
 
