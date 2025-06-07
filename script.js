@@ -1,5 +1,40 @@
+let requestedPrefix = "";
 let latestVariations = [];
 
+function requestCode(prefix) {
+  requestedPrefix = prefix;
+  const randomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const timestamp = new Date().toLocaleString();
+
+  fetch("https://api.ipify.org?format=json")
+    .then(res => res.json())
+    .then(data => {
+      const message = `🔓 Unlock request\nMode: ${prefix}\nCode: ${prefix}-${randomId}\nTime: ${timestamp}\nIP: ${data.ip}`;
+      return fetch("/api/send-telegram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message })
+      });
+    })
+    .then(() => showStatus(`Code request sent. Admin will reply with your ${requestedPrefix.toUpperCase()} code.`))
+    .catch(() => showStatus("❌ Failed to contact Telegram"));
+}
+
+function verifyCode() {
+  const code = document.getElementById("code").value.trim().toLowerCase();
+  if (!code.startsWith(requestedPrefix)) {
+    return showStatus("❌ Invalid code for selected mode");
+  }
+
+  document.getElementById("unlock-screen").style.display = "none";
+  document.getElementById("unlocked-panel").style.display = "block";
+}
+
+function showStatus(msg) {
+  document.getElementById("status").textContent = msg;
+}
+
+// === Tabs ===
 document.querySelectorAll('.tab').forEach(tab => {
   tab.onclick = () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -9,6 +44,7 @@ document.querySelectorAll('.tab').forEach(tab => {
   };
 });
 
+// === Gmail Generator Auto Update ===
 document.getElementById("gmail-base").addEventListener("input", () => {
   const input = document.getElementById("gmail-base").value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!input) {
@@ -34,14 +70,12 @@ document.getElementById("gmail-base").addEventListener("input", () => {
   }
 
   latestVariations = Array.from(emails);
-  const list = latestVariations.map(e => `<li>${e}</li>`).join("");
-  document.getElementById("variation-list").innerHTML = list;
+  document.getElementById("variation-list").innerHTML = latestVariations.map(e => `<li>${e}</li>`).join("");
 });
 
 function downloadVariations() {
   const format = document.getElementById("format-select").value;
   if (!latestVariations.length) return alert("No variations to download.");
-
   const content = latestVariations.join("\n");
 
   if (format === "csv" || format === "txt") {
@@ -64,6 +98,7 @@ function downloadVariations() {
   }
 }
 
+// === CSV Converter ===
 function downloadCSV() {
   const data = document.getElementById("csv-input").value.trim().split(/\r?\n/).filter(x => x.includes("@"));
   if (!data.length) return alert("No valid emails to export.");
@@ -74,6 +109,7 @@ function downloadCSV() {
   a.click();
 }
 
+// === Duplicate Checker ===
 function checkDuplicates() {
   const input = document.getElementById("dupe-input").value.trim().split(/\r?\n/);
   const seen = new Set();
@@ -87,6 +123,7 @@ function checkDuplicates() {
   document.getElementById("dupe-result").innerHTML = result || "<li>No duplicates found.</li>";
 }
 
+// === File Loader ===
 function loadFile(type, event) {
   const reader = new FileReader();
   reader.onload = function () {
