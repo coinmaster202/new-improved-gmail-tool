@@ -1,52 +1,22 @@
-let requestedPrefix = "";
+let latestVariations = [];
 
-function requestCode(prefix) {
-  requestedPrefix = prefix;
-  const randomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-  const timestamp = new Date().toLocaleString();
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.tab).classList.add('active');
+  };
+});
 
-  fetch("https://api.ipify.org?format=json")
-    .then(res => res.json())
-    .then(data => {
-      const ip = data.ip;
-      const message = `🔓 Unlock request received\nMode: ${prefix}\nCode: ${prefix}-${randomId}\nTime: ${timestamp}\nIP: ${ip}`;
-
-      return fetch("/api/send-telegram", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message })
-      });
-    })
-    .then(() => {
-      showStatus(`Code request sent. Admin will reply with your ${requestedPrefix.toUpperCase()} code.`);
-    })
-    .catch(() => {
-      showStatus("❌ Failed to contact Telegram. Try again.");
-    });
-}
-
-function verifyCode() {
-  const code = document.getElementById("code").value.trim().toLowerCase();
-  if (!requestedPrefix || !code.startsWith(requestedPrefix)) {
-    showStatus("❌ Invalid code for selected mode.");
+document.getElementById("gmail-base").addEventListener("input", () => {
+  const input = document.getElementById("gmail-base").value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!input) {
+    document.getElementById("variation-count").textContent = "Possibilities: 0";
+    document.getElementById("variation-list").innerHTML = "";
+    latestVariations = [];
     return;
   }
-
-  showStatus("✅ Code accepted. Access granted.");
-  document.getElementById("unlocked-panel").style.display = "block";
-  document.getElementById("unlock-buttons").style.display = "none";
-  document.getElementById("code-entry").style.display = "none";
-}
-
-function showStatus(msg) {
-  document.getElementById("status").textContent = msg;
-}
-
-// === Gmail Generator ===
-
-function generateEmails() {
-  const input = document.getElementById("gmail-base").value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (!input) return alert("Please enter a valid Gmail name.");
 
   const total = Math.pow(2, input.length - 1);
   document.getElementById("variation-count").textContent = `Possibilities: ${total}`;
@@ -63,11 +33,36 @@ function generateEmails() {
     emails.add(combo + "@gmail.com");
   }
 
-  const list = Array.from(emails).map(e => `<li>${e}</li>`).join("");
+  latestVariations = Array.from(emails);
+  const list = latestVariations.map(e => `<li>${e}</li>`).join("");
   document.getElementById("variation-list").innerHTML = list;
-}
+});
 
-// === CSV Converter ===
+function downloadVariations() {
+  const format = document.getElementById("format-select").value;
+  if (!latestVariations.length) return alert("No variations to download.");
+
+  const content = latestVariations.join("\n");
+
+  if (format === "csv" || format === "txt") {
+    const blob = new Blob([content], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `gmail_variations.${format}`;
+    a.click();
+  } else if (format === "zip") {
+    import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js').then(JSZipModule => {
+      const zip = new JSZipModule.default();
+      zip.file("gmail_variations.txt", content);
+      zip.generateAsync({ type: "blob" }).then(blob => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "gmail_variations.zip";
+        a.click();
+      });
+    });
+  }
+}
 
 function downloadCSV() {
   const data = document.getElementById("csv-input").value.trim().split(/\r?\n/).filter(x => x.includes("@"));
@@ -78,8 +73,6 @@ function downloadCSV() {
   a.download = "converted.csv";
   a.click();
 }
-
-// === Duplicate Checker ===
 
 function checkDuplicates() {
   const input = document.getElementById("dupe-input").value.trim().split(/\r?\n/);
@@ -93,8 +86,6 @@ function checkDuplicates() {
   const result = dups.map(d => `<li>${d}</li>`).join("");
   document.getElementById("dupe-result").innerHTML = result || "<li>No duplicates found.</li>";
 }
-
-// === File Loader ===
 
 function loadFile(type, event) {
   const reader = new FileReader();
