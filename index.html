@@ -2,81 +2,111 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>One Two Gmail Tool Unlock</title>
+  <title>One Two Gmail Tool</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
     body {
       font-family: Arial, sans-serif;
       background: #f3f4f6;
+      margin: 0;
+      padding: 0;
       text-align: center;
-      padding: 40px;
-      color: #333;
     }
-    h1 { color: #6b21a8; }
+    header {
+      background: #9333ea;
+      color: white;
+      padding: 20px;
+    }
+    .tabs {
+      display: flex;
+      justify-content: center;
+      background: #e5e7eb;
+      margin-top: 0;
+    }
+    .tab {
+      flex: 1;
+      padding: 15px;
+      cursor: pointer;
+      background: #ddd;
+      font-weight: bold;
+      transition: all 0.3s;
+    }
+    .tab.active {
+      background: #9333ea;
+      color: white;
+    }
+    .section {
+      display: none;
+      padding: 20px;
+      animation: fadeIn 0.3s ease-in;
+    }
+    .section.active {
+      display: block;
+    }
+    input, textarea, select, button {
+      padding: 10px;
+      margin: 10px auto;
+      width: 90%;
+      max-width: 500px;
+      display: block;
+      font-size: 16px;
+    }
     button {
-      margin: 5px;
-      padding: 12px 20px;
       background: #9333ea;
       color: white;
       border: none;
-      border-radius: 6px;
+      border-radius: 5px;
       font-weight: bold;
       cursor: pointer;
     }
-    button:hover { background: #7e22ce; }
-    input, textarea {
-      padding: 10px;
-      margin: 10px;
-      width: 90%;
+    button:hover {
+      background: #7e22ce;
+    }
+    ul {
+      list-style: none;
+      padding: 0;
+    }
+    li {
+      margin: 5px auto;
       max-width: 500px;
+      text-align: left;
     }
-    #unlocked-panel {
-      display: none;
-      margin-top: 30px;
-      background: white;
-      border-radius: 10px;
-      padding: 20px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
     }
-    ul { list-style: none; padding: 0; }
-    li { text-align: left; margin: 4px auto; max-width: 500px; }
   </style>
 </head>
 <body>
+  <header>
+    <h1>One Two Gmail Tool</h1>
+  </header>
 
-  <h1>One Two Gmail Tool Unlock</h1>
-  <p>Select your unlock option:</p>
-
-  <div id="unlock-buttons">
-    <button onclick="requestCode('v200')">Unlock 200</button>
-    <button onclick="requestCode('v500')">Unlock 500</button>
-    <button onclick="requestCode('v1000')">Unlock 1000</button>
-    <button onclick="requestCode('v5000')">Unlock 5000</button>
-    <button onclick="requestCode('unlimt')">Unlock Unlimited</button>
+  <div class="tabs">
+    <div class="tab active" data-tab="generator">Gmail Generator</div>
+    <div class="tab" data-tab="csv">CSV Converter</div>
+    <div class="tab" data-tab="dupe">Duplicate Checker</div>
   </div>
 
-  <div id="code-entry">
-    <input id="code" placeholder="Paste your unlock code here" />
-    <button onclick="verifyCode()">Submit Code</button>
-  </div>
-
-  <p id="status"></p>
-
-  <div id="unlocked-panel">
-    <h2>Gmail Variation Generator</h2>
+  <div id="generator" class="section active">
     <input id="gmail-base" placeholder="Enter Gmail base (e.g., example)">
     <p id="variation-count">Possibilities: 0</p>
-    <button onclick="generateEmails()">Generate</button>
+    <select id="format-select">
+      <option value="csv">Download as CSV</option>
+      <option value="txt">Download as TXT</option>
+      <option value="zip">Download as ZIP</option>
+    </select>
+    <button onclick="downloadVariations()">Download Variations</button>
     <ul id="variation-list"></ul>
+  </div>
 
-    <hr>
-    <h2>CSV Converter</h2>
+  <div id="csv" class="section">
     <input type="file" accept=".txt,.csv" onchange="loadFile('csv', event)">
     <textarea id="csv-input" placeholder="Paste emails here..."></textarea>
     <button onclick="downloadCSV()">Download as CSV</button>
+  </div>
 
-    <hr>
-    <h2>Duplicate Checker</h2>
+  <div id="dupe" class="section">
     <input type="file" accept=".txt,.csv" onchange="loadFile('dupe', event)">
     <textarea id="dupe-input" placeholder="Paste emails here..."></textarea>
     <button onclick="checkDuplicates()">Check Duplicates</button>
