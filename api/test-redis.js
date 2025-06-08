@@ -1,29 +1,24 @@
-// scripts/test-redis.js
 import { Redis } from "@upstash/redis";
 
-// Connect using environment variables
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-async function testInsertCode() {
+export default async function handler(req, res) {
   const code = "v500-123456";
 
   try {
     await redis.set(code, true);
-    const check = await redis.get(code);
-
-    if (check) {
-      console.log(`✅ Successfully inserted: ${code}`);
-    } else {
-      console.log(`❌ Failed to insert: ${code}`);
-    }
+    const value = await redis.get(code);
+    return res.status(200).json({
+      message: `✅ Code inserted: ${code}`,
+      value,
+    });
   } catch (e) {
-    console.error("❌ Redis error:", e);
+    return res.status(500).json({
+      error: "❌ Redis insert failed",
+      details: e.message,
+    });
   }
-
-  process.exit();
 }
-
-testInsertCode();
