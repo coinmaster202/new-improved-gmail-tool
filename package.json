@@ -4,7 +4,8 @@
   "type": "module",
   "main": "api/index.js",
   "scripts": {
-    "start": "node api/server.js"
+    "start": "node api/server.js",
+    "test-redis": "node public/test-redis.js"
   },
   "dependencies": {
     "express": "^4.18.2",
