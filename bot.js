@@ -1,106 +1,63 @@
-import TelegramBot from "node-telegram-bot-api";
-import { Redis } from "@upstash/redis";
-import fs from "fs";
-import path from "path";
+// ✅ Full working bot.js that reads codes from code.txt, deletes used ones from the file, // allows adding new codes via Telegram (/add), viewing remaining (/view), and pulls them properly.
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
-});
+import TelegramBot from "node-telegram-bot-api"; import { Redis } from "@upstash/redis"; import fs from "fs"; import path from "path";
 
-const CODE_FILE = path.resolve("code.txt");
-const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"];
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; const redis = new Redis({ url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN, });
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+const CODE_FILE_PATH = path.join("code.txt"); const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"]; const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
-function readCodes() {
-  if (!fs.existsSync(CODE_FILE)) return [];
-  return fs.readFileSync(CODE_FILE, "utf8")
-    .split(/\r?\n/)
-    .map(l => l.trim())
-    .filter(Boolean);
+function getCodesFromFile() { if (!fs.existsSync(CODE_FILE_PATH)) return []; return fs.readFileSync(CODE_FILE_PATH, "utf8") .split(/\r?\n/) .map((line) => line.trim()) .filter(Boolean); }
+
+function saveCodesToFile(codes) { fs.writeFileSync(CODE_FILE_PATH, codes.join("\n"), "utf8"); }
+
+bot.on("message", async (msg) => { const chatId = msg.chat.id; const text = msg.text?.trim();
+
+if (!text) return;
+
+// ✅ /view command: show count per prefix if (text === "/view") { const codes = getCodesFromFile(); const counts = {}; for (const prefix of validPrefixes) { counts[prefix] = codes.filter((c) => c.startsWith(prefix)).length; } const message = "📦 Remaining Codes:\n" + validPrefixes.map((p) => ${p}: ${counts[p] || 0}).join("\n"); bot.sendMessage(chatId, message); return; }
+
+// ✅ /add command if (text.startsWith("/add")) { const input = text.slice(4).trim(); const lines = input.split(/,|\n/).map((line) => line.trim()).filter(Boolean); const validCodes = lines.filter( (c) => validPrefixes.some((p) => c.startsWith(p)) && /^\w+-\d{6}$/.test(c) );
+
+const existing = new Set(getCodesFromFile());
+const fresh = validCodes.filter((c) => !existing.has(c));
+if (fresh.length) {
+  const updated = [...existing, ...fresh];
+  saveCodesToFile(updated);
+}
+bot.sendMessage(chatId, `✅ Added ${fresh.length} new codes.`);
+return;
+
 }
 
-function writeCodes(codes) {
-  fs.writeFileSync(CODE_FILE, codes.join("\n"), "utf8");
+// ✅ /code <mode> command if (text.startsWith("/code")) { const parts = text.split(" "); const mode = parts[1]?.trim().toLowerCase();
+
+if (!validPrefixes.includes(mode)) {
+  bot.sendMessage(chatId, "❌ Usage: /code v200 (or v500, v1000, etc)");
+  return;
 }
 
-function isValidCode(code) {
-  const [prefix, suffix] = code.split("-");
-  return validPrefixes.includes(prefix) && /^[a-z0-9]{6}$/i.test(suffix);
+const codes = getCodesFromFile();
+const available = codes.filter((c) => c.startsWith(mode));
+
+if (available.length === 0) {
+  bot.sendMessage(chatId, `❌ No unused ${mode} codes found.`);
+  return;
 }
 
-bot.on("message", async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text?.trim();
+const selected = available[Math.floor(Math.random() * available.length)];
+await redis.set(selected, true);
 
-  if (!text) return;
+const remaining = codes.filter((c) => c !== selected);
+saveCodesToFile(remaining);
 
-  // ✅ View remaining
-  if (text === "/view") {
-    const codes = readCodes();
-    const countByPrefix = validPrefixes.map(p => `${p}: ${codes.filter(c => c.startsWith(p)).length}`).join("\n");
-    bot.sendMessage(chatId, `📦 Remaining Codes:\n${countByPrefix}`);
-    return;
-  }
+bot.sendMessage(chatId, `🎟️ Your unlock code: ${selected}`);
+return;
 
-  // ✅ Add codes (bulk multi-line)
-  if (text.startsWith("/add")) {
-    const lines = text.split("\n").slice(1);
-    const newCodes = lines.map(l => l.trim()).filter(isValidCode);
+}
 
-    if (newCodes.length === 0) {
-      return bot.sendMessage(chatId, "❌ Invalid format. Use:\n/add\nv200-xxxxxx\nv500-xxxxxx");
-    }
+// ✅ /clear-all command if (text === "/clear-all") { bot.sendMessage(chatId, "⚠️ Type /confirm within 10 seconds to delete ALL used codes."); bot.once("message", async (m) => { if (m.text?.trim() === "/confirm" && m.chat.id === chatId) { let deleted = 0; try { for (const prefix of validPrefixes) { const iter = redis.scanIterator({ match: ${prefix}-*, count: 100 }); for await (const key of iter) { await redis.del(key); deleted++; } } bot.sendMessage(chatId, ✅ Deleted ${deleted} used codes from Redis.); } catch (e) { console.error("❌ Redis clear error:", e); bot.sendMessage(chatId, "❌ Failed to clear Redis."); } } else { bot.sendMessage(chatId, "❌ Clear cancelled."); } }); return; }
 
-    const existing = new Set(readCodes());
-    const filtered = newCodes.filter(code => !existing.has(code));
+if (text === "/ping") { try { await redis.set("test-key", "ok", { ex: 5 }); const result = await redis.get("test-key"); bot.sendMessage(chatId, result === "ok" ? "✅ Redis is online." : "❌ Redis error."); } catch { bot.sendMessage(chatId, "❌ Redis unreachable."); } return; } });
 
-    if (filtered.length > 0) {
-      fs.appendFileSync(CODE_FILE, "\n" + filtered.join("\n"));
-    }
+console.log("🤖 Telegram bot initialized.");
 
-    bot.sendMessage(chatId, `✅ Added ${filtered.length} new codes.`);
-    return;
-  }
-
-  // ✅ Generate code
-  if (text.startsWith("/code")) {
-    const parts = text.split(" ");
-    const mode = parts[1]?.toLowerCase();
-
-    if (!validPrefixes.includes(mode)) {
-      return bot.sendMessage(chatId, "❌ Usage: /code v200 (or v500, v1000, etc)");
-    }
-
-    try {
-      const used = new Set();
-      const scan = redis.scanIterator({ match: `${mode}-*`, count: 100 });
-      for await (const key of scan) used.add(key);
-
-      const all = readCodes();
-      const available = all.filter(code => code.startsWith(mode) && !used.has(code));
-
-      if (available.length === 0) {
-        return bot.sendMessage(chatId, `❌ No unused ${mode} codes found.`);
-      }
-
-      const selected = available[Math.floor(Math.random() * available.length)];
-      await redis.set(selected, true);
-
-      // Remove used code from file
-      const updated = all.filter(c => c !== selected);
-      writeCodes(updated);
-
-      bot.sendMessage(chatId, `🎟️ Your unlock code: ${selected}`);
-    } catch (err) {
-      console.error(err);
-      bot.sendMessage(chatId, "❌ Failed to pull code.");
-    }
-
-    return;
-  }
-});
-
-console.log("🤖 Telegram Bot Running");
