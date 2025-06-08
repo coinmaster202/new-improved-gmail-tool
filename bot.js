@@ -1,146 +1,135 @@
 import TelegramBot from "node-telegram-bot-api";
 import { Redis } from "@upstash/redis";
+import csvParser from "csv-parser";
 import fs from "fs";
 import https from "https";
-import csvParser from "csv-parser";
 
-// ✅ Configure from Railway variables
+// 🚨 Replace with your environment variable if not using Railway ENV directly
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-// 📦 Telegram bot setup
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
+const allowedUsers = [6630390831]; // Replace with your actual Telegram user ID
 const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"];
-const confirmMap = new Map(); // track who issued /clear
+const clearConfirmations = new Set();
 
-// 🔐 Accept files (CSV, TXT, JSON)
-bot.on("document", async (msg) => {
+bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
-  const fileName = msg.document.file_name.toLowerCase();
-  const fileId = msg.document.file_id;
-  const file = await bot.getFile(fileId);
-  const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-  const tempPath = `./temp-${Date.now()}-${fileName}`;
-  const stream = fs.createWriteStream(tempPath);
+  const userId = msg.from.id;
 
-  https.get(fileUrl, (res) => {
-    res.pipe(stream);
-    stream.on("finish", async () => {
-      stream.close();
-      let added = 0;
+  if (msg.document) {
+    const fileName = msg.document.file_name;
+    const fileId = msg.document.file_id;
+    const ext = fileName.split(".").pop();
 
-      if (fileName.endsWith(".csv")) {
-        added = await loadCSV(tempPath);
-      } else if (fileName.endsWith(".json")) {
-        added = await loadJSON(tempPath);
-      } else if (fileName.endsWith(".txt")) {
-        added = await loadTXT(tempPath);
-      }
-
-      fs.unlinkSync(tempPath);
-      bot.sendMessage(chatId, `✅ Done! ${added} valid codes added.`);
-    });
-  });
-});
-
-// 🧹 Clear command with confirmation
-bot.onText(/\/clear/, (msg) => {
-  const chatId = msg.chat.id;
-  confirmMap.set(chatId, true);
-  bot.sendMessage(chatId, "⚠️ Are you sure you want to delete ALL unlock codes from Redis?\nReply with `/confirm` within 60 seconds to proceed.");
-  setTimeout(() => confirmMap.delete(chatId), 60000);
-});
-
-bot.onText(/\/confirm/, async (msg) => {
-  const chatId = msg.chat.id;
-  if (!confirmMap.has(chatId)) {
-    return bot.sendMessage(chatId, "⛔ No pending /clear command.");
-  }
-
-  confirmMap.delete(chatId);
-
-  try {
-    const keys = await redis.keys("*");
-    const unlockKeys = keys.filter((k) =>
-      validPrefixes.some((p) => k.toLowerCase().startsWith(p))
-    );
-    if (unlockKeys.length === 0) {
-      return bot.sendMessage(chatId, "ℹ️ No unlock codes found in Redis.");
+    if (!["csv", "txt", "json"].includes(ext)) {
+      return bot.sendMessage(chatId, "⚠️ Only CSV, TXT, or JSON files are supported.");
     }
 
-    await Promise.all(unlockKeys.map((k) => redis.del(k)));
-    bot.sendMessage(chatId, `🧹 Cleared ${unlockKeys.length} unlock codes.`);
-  } catch (err) {
-    console.error("Clear error:", err);
-    bot.sendMessage(chatId, "❌ Failed to clear codes.");
+    const file = await bot.getFile(fileId);
+    const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+    const tempPath = `./temp-${Date.now()}.${ext}`;
+    const fileStream = fs.createWriteStream(tempPath);
+
+    https.get(fileUrl, (res) => {
+      res.pipe(fileStream);
+      fileStream.on("finish", async () => {
+        fileStream.close();
+
+        let inserted = 0;
+        if (ext === "csv") {
+          inserted = await insertFromCSV(tempPath);
+        } else if (ext === "txt") {
+          inserted = await insertFromTXT(tempPath);
+        } else if (ext === "json") {
+          inserted = await insertFromJSON(tempPath);
+        }
+
+        fs.unlinkSync(tempPath);
+        bot.sendMessage(chatId, `✅ Upload complete: ${inserted} valid codes added.`);
+      });
+    });
   }
 });
 
-// 🧠 Helpers
-async function loadCSV(filePath) {
+// 🧹 /clear command with confirmation
+bot.onText(/\/clear/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+
+  if (!allowedUsers.includes(userId)) {
+    return bot.sendMessage(chatId, "⛔ You are not authorized to perform this action.");
+  }
+
+  if (clearConfirmations.has(userId)) {
+    let deleted = 0;
+    for (const prefix of validPrefixes) {
+      const keys = await redis.keys(`${prefix}-*`);
+      for (const key of keys) {
+        await redis.del(key);
+        deleted++;
+      }
+    }
+    clearConfirmations.delete(userId);
+    return bot.sendMessage(chatId, `🗑️ Deleted ${deleted} unlock codes.`);
+  } else {
+    clearConfirmations.add(userId);
+    return bot.sendMessage(chatId, "⚠️ Confirm deletion by sending /clear again.");
+  }
+});
+
+// 📦 File processors
+async function insertFromCSV(filePath) {
   return new Promise((resolve) => {
     let count = 0;
     fs.createReadStream(filePath)
       .pipe(csvParser({ headers: false }))
       .on("data", async (row) => {
         const code = Object.values(row)[0]?.toLowerCase().trim();
-        if (isValidCode(code)) {
-          const exists = await redis.get(code);
-          if (!exists) {
-            await redis.set(code, true);
-            count++;
-          }
+        if (await isValidCode(code)) {
+          await redis.set(code, true);
+          count++;
         }
       })
       .on("end", () => resolve(count));
   });
 }
 
-async function loadTXT(filePath) {
-  const lines = fs.readFileSync(filePath, "utf-8").split("\n");
+async function insertFromTXT(filePath) {
+  const lines = fs.readFileSync(filePath, "utf-8").split(/\r?\n/);
   let count = 0;
   for (const line of lines) {
-    const code = line.trim().toLowerCase();
-    if (isValidCode(code)) {
-      const exists = await redis.get(code);
-      if (!exists) {
-        await redis.set(code, true);
-        count++;
-      }
+    const code = line.toLowerCase().trim();
+    if (await isValidCode(code)) {
+      await redis.set(code, true);
+      count++;
     }
   }
   return count;
 }
 
-async function loadJSON(filePath) {
-  const raw = fs.readFileSync(filePath, "utf-8");
-  let data = [];
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return 0;
-  }
+async function insertFromJSON(filePath) {
+  const content = JSON.parse(fs.readFileSync(filePath, "utf-8"));
   let count = 0;
-  for (const code of data) {
-    const clean = code.trim().toLowerCase();
-    if (isValidCode(clean)) {
-      const exists = await redis.get(clean);
-      if (!exists) {
-        await redis.set(clean, true);
-        count++;
-      }
+  const codes = Array.isArray(content) ? content : Object.values(content);
+  for (const raw of codes) {
+    const code = raw.toLowerCase().trim();
+    if (await isValidCode(code)) {
+      await redis.set(code, true);
+      count++;
     }
   }
   return count;
 }
 
-function isValidCode(code) {
-  const [prefix, suffix] = code?.split("-");
-  return validPrefixes.includes(prefix) && suffix?.length >= 4;
+// 🔍 Code validator
+async function isValidCode(code) {
+  const [prefix, suffix] = code.split("-");
+  if (!validPrefixes.includes(prefix) || suffix?.length !== 6) return false;
+  const exists = await redis.get(code);
+  return !exists;
 }
-
-console.log("🤖 Telegram bot is running and listening...");
