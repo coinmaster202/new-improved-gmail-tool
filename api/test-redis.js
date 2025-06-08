@@ -6,30 +6,24 @@ const redis = new Redis({
 });
 
 export default async function handler(req, res) {
-  const prefix = "v500";
-  const insertedKey = `${prefix}-123456`;
-
   try {
-    // Insert a test key to make sure connection is fine
-    await redis.set(insertedKey, true);
-
-    // Use SCAN to fetch keys
-    const result = [];
-    for await (const key of redis.scanIterator({ match: `${prefix}-*` })) {
-      const val = await redis.get(key);
-      result.push({ key, value: val });
+    // Accept GET and POST for debugging
+    if (req.method !== "POST" && req.method !== "GET") {
+      return res.status(405).json({ error: "Only GET or POST allowed" });
     }
 
-    return res.status(200).json({
-      message: `✅ SCAN completed for ${prefix}-*`,
-      total: result.length,
-      entries: result,
+    const testKey = "v500-testkey123";
+    await redis.set(testKey, true);
+    const value = await redis.get(testKey);
+
+    res.status(200).json({
+      message: `✅ Code inserted: ${testKey}`,
+      value,
     });
-  } catch (e) {
-    console.error("❌ Redis SCAN error:", e);
-    return res.status(500).json({
+  } catch (err) {
+    res.status(500).json({
       error: "❌ Redis test failed",
-      details: e.message,
+      details: err.message || err.toString(),
     });
   }
 }
