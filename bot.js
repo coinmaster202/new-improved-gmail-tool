@@ -1,165 +1,146 @@
 import TelegramBot from "node-telegram-bot-api";
 import { Redis } from "@upstash/redis";
-import https from "https";
+import fetch from "node-fetch";
 import fs from "fs";
+import https from "https";
 import csvParser from "csv-parser";
 
-// ENV variables (Railway project or .env)
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+// Redis setup
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
-const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+// Telegram bot setup
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+const ADMIN_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
 const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"];
-let clearPending = false;
-let clearTimeout = null;
 
-// 🧠 Listen for files
+let pendingClear = false;
+let confirmTimeout = null;
+
+// 📁 File upload handler
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
+  if (chatId.toString() !== ADMIN_CHAT_ID) return;
 
-  if (msg.document) {
-    const ext = msg.document.file_name.split('.').pop().toLowerCase();
-    const fileId = msg.document.file_id;
-    const file = await bot.getFile(fileId);
-    const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-    const tempPath = `./temp-${Date.now()}.${ext}`;
+  // If text command, ignore here
+  if (!msg.document) return;
 
-    const fileStream = fs.createWriteStream(tempPath);
-    https.get(fileUrl, (res) => {
-      res.pipe(fileStream);
-      fileStream.on("finish", async () => {
-        fileStream.close();
-        let added = 0;
+  const file = msg.document;
+  const fileId = file.file_id;
+  const fileName = file.file_name.toLowerCase();
 
-        if (ext === "csv") {
-          added = await handleCSV(tempPath);
-        } else if (ext === "txt") {
-          added = await handleText(tempPath);
-        } else if (ext === "json") {
-          added = await handleJSON(tempPath);
-        }
-
-        fs.unlinkSync(tempPath);
-        bot.sendMessage(chatId, `✅ Done! ${added} valid codes added.`);
-      });
-    });
+  if (!fileName.endsWith(".csv") && !fileName.endsWith(".txt") && !fileName.endsWith(".json")) {
+    bot.sendMessage(chatId, "❌ Unsupported file type. Send a .csv, .txt or .json file.");
+    return;
   }
+
+  const fileInfo = await bot.getFile(fileId);
+  const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${fileInfo.file_path}`;
+  const tempPath = `./upload-${Date.now()}-${fileName}`;
+  const fileStream = fs.createWriteStream(tempPath);
+
+  https.get(fileUrl, (res) => {
+    res.pipe(fileStream);
+    fileStream.on("finish", async () => {
+      fileStream.close();
+
+      let inserted = 0;
+      if (fileName.endsWith(".csv") || fileName.endsWith(".txt")) {
+        inserted = await insertFromTextOrCSV(tempPath);
+      } else if (fileName.endsWith(".json")) {
+        inserted = await insertFromJSON(tempPath);
+      }
+
+      fs.unlinkSync(tempPath);
+      bot.sendMessage(chatId, `✅ Done! ${inserted} new codes added.`);
+    });
+  });
 });
 
-// 📦 CSV Upload
-async function handleCSV(filePath) {
+// ✅ Insert CSV or TXT (line-by-line codes)
+async function insertFromTextOrCSV(path) {
   return new Promise((resolve) => {
     let count = 0;
-    fs.createReadStream(filePath)
-      .pipe(csvParser())
-      .on("data", async (row) => {
-        const code = Object.values(row)[0]?.toLowerCase().trim();
-        if (isValidCode(code)) {
-          const exists = await redis.get(code);
-          if (!exists) {
-            await redis.set(code, true);
-            count++;
-          }
+    const stream = fs.createReadStream(path).pipe(csvParser({ headers: false }));
+    stream.on("data", async (row) => {
+      const code = Object.values(row)[0]?.toLowerCase().trim();
+      if (isValidCode(code)) {
+        const exists = await redis.get(code);
+        if (!exists) {
+          await redis.set(code, true);
+          count++;
         }
-      })
-      .on("end", () => resolve(count));
+      }
+    });
+    stream.on("end", () => resolve(count));
   });
 }
 
-// 📄 TXT Upload
-async function handleText(filePath) {
-  const content = fs.readFileSync(filePath, "utf-8").split("\n");
+// ✅ Insert from JSON
+async function insertFromJSON(path) {
   let count = 0;
-  for (const line of content) {
-    const code = line.trim().toLowerCase();
-    if (isValidCode(code)) {
-      const exists = await redis.get(code);
-      if (!exists) {
-        await redis.set(code, true);
-        count++;
+  const content = fs.readFileSync(path, "utf8");
+  try {
+    const codes = JSON.parse(content);
+    for (const code of codes) {
+      if (isValidCode(code)) {
+        const exists = await redis.get(code.toLowerCase());
+        if (!exists) {
+          await redis.set(code.toLowerCase(), true);
+          count++;
+        }
       }
     }
-  }
-  return count;
-}
-
-// 🧾 JSON Upload
-async function handleJSON(filePath) {
-  const content = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-  let count = 0;
-  for (const item of content) {
-    const code = typeof item === "string" ? item : item.code;
-    if (code && isValidCode(code.toLowerCase())) {
-      const exists = await redis.get(code.toLowerCase());
-      if (!exists) {
-        await redis.set(code.toLowerCase(), true);
-        count++;
-      }
-    }
+  } catch (err) {
+    console.error("JSON Parse Error", err);
   }
   return count;
 }
 
 // ✅ Code format check
 function isValidCode(code) {
-  const [prefix, suffix] = code.split("-");
+  if (!code || !code.includes("-")) return false;
+  const [prefix, suffix] = code.toLowerCase().split("-");
   return validPrefixes.includes(prefix) && suffix?.length === 6;
 }
 
-// ⚠️ /clear logic
+// ⚠️ /clear with confirmation
 bot.onText(/\/clear/, (msg) => {
-  const chatId = msg.chat.id;
-  if (clearPending) {
-    bot.sendMessage(chatId, "⚠️ Confirm deletion by sending /clear again.");
-    return;
-  }
+  if (msg.chat.id.toString() !== ADMIN_CHAT_ID) return;
+  pendingClear = true;
+  bot.sendMessage(msg.chat.id, "⚠️ Are you sure you want to delete ALL unlock codes from Redis?\nReply with `/confirm` within 60 seconds to proceed.", { parse_mode: "Markdown" });
 
-  clearPending = true;
-  bot.sendMessage(
-    chatId,
-    "⚠️ Are you sure you want to delete ALL unlock codes from Redis?\nReply with `/confirm` within 60 seconds to proceed.",
-    { parse_mode: "Markdown" }
-  );
-
-  clearTimeout = setTimeout(() => {
-    clearPending = false;
+  confirmTimeout = setTimeout(() => {
+    pendingClear = false;
   }, 60000);
 });
 
-// ✅ /confirm logic
 bot.onText(/\/confirm/, async (msg) => {
-  const chatId = msg.chat.id;
-  if (!clearPending) {
-    bot.sendMessage(chatId, "⚠️ No pending clear request.");
+  if (msg.chat.id.toString() !== ADMIN_CHAT_ID) return;
+  if (!pendingClear) {
+    bot.sendMessage(msg.chat.id, "⚠️ Confirm deletion by sending /clear again.");
     return;
   }
 
   try {
     const keys = await redis.keys("*");
-    const filtered = keys.filter((k) => validPrefixes.some((p) => k.startsWith(p)));
-    await Promise.all(filtered.map((k) => redis.del(k)));
-    clearPending = false;
-    clearTimeout && clearTimeout(clearTimeout);
-    bot.sendMessage(chatId, `✅ ${filtered.length} codes cleared from Redis.`);
-  } catch (err) {
-    console.error("Clear failed:", err);
-    bot.sendMessage(chatId, "❌ Failed to clear codes.");
+    const unlockKeys = keys.filter((k) =>
+      validPrefixes.some((prefix) => k.toLowerCase().startsWith(prefix))
+    );
+    for (const key of unlockKeys) {
+      await redis.del(key);
+    }
+
+    pendingClear = false;
+    clearTimeout(confirmTimeout);
+    bot.sendMessage(msg.chat.id, "✅ All unlock codes successfully cleared.");
+  } catch (e) {
+    console.error("Clear error:", e);
+    bot.sendMessage(msg.chat.id, "❌ Failed to clear codes.");
   }
 });
 
-// 🔁 Redis Ping
-bot.onText(/\/ping/, async (msg) => {
-  const chatId = msg.chat.id;
-  try {
-    await redis.set("test_ping", "ok");
-    const result = await redis.get("test_ping");
-    await redis.del("test_ping");
-    bot.sendMessage(chatId, `🟢 Redis responded: ${result}`);
-  } catch (err) {
-    bot.sendMessage(chatId, "🔴 Redis error.");
-  }
-});
+console.log("🤖 Telegram bot is running...");
