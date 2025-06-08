@@ -5,27 +5,28 @@ let latestVariations = [];
 // 🔓 Request unlock code via Telegram
 function requestCode(prefix) {
   requestedPrefix = prefix;
-  const randomId = Math.floor(100000 + Math.random() * 900000).toString(); // ✅ 6-digit numeric code
+  const randomId = Math.floor(100000 + Math.random() * 900000);
+  const fullCode = `${prefix}-${randomId}`;
   const timestamp = new Date().toLocaleString();
 
   fetch("https://api.ipify.org?format=json")
     .then(res => res.json())
     .then(data => {
-      const message = `🔓 Unlock request\nMode: ${prefix}\nCode: ${prefix}-${randomId}\nTime: ${timestamp}\nIP: ${data.ip}`;
+      const message = `🔓 Unlock request\nMode: ${prefix}\nCode: ${fullCode}\nTime: ${timestamp}\nIP: ${data.ip}`;
       return fetch("/api/send-telegram", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message })
       });
     })
-    .then(() => showStatus(`Code request sent. Admin will reply with your ${requestedPrefix.toUpperCase()} code.`))
+    .then(() => showStatus(`Code request sent. Admin will reply with your ${prefix.toUpperCase()} code.`))
     .catch(() => showStatus("❌ Failed to contact Telegram"));
 }
 
 // ✅ Verify unlock code and get variation limit
 async function verifyCode() {
   const code = document.getElementById("code").value.trim().toLowerCase();
-  if (!code.includes("-")) return showStatus("❌ Invalid code");
+  if (!code.match(/^[a-z]+\-\d{6}$/)) return showStatus("❌ Invalid code format");
 
   const res = await fetch("/api/verify-code", {
     method: "POST",
@@ -66,7 +67,7 @@ document.getElementById("gmail-base").addEventListener("input", () => {
   }
 
   const total = Math.pow(2, input.length - 1);
-  const limit = Math.min(total, variationLimit || Infinity);
+  const limit = Math.min(total, variationLimit);
   document.getElementById("variation-count").textContent = `Possibilities: ${limit}`;
 
   const emails = new Set();
