@@ -4,7 +4,7 @@ import https from "https";
 import fs from "fs";
 import csvParser from "csv-parser";
 
-// Env setup
+// ✅ ENVIRONMENT SETUP
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -13,10 +13,11 @@ const redis = new Redis({
 const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"];
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
+// 🤖 MESSAGE HANDLER
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
 
-  // 📁 File upload handler
+  // 📁 Handle file uploads
   if (msg.document) {
     const fileId = msg.document.file_id;
     const fileName = msg.document.file_name.toLowerCase();
@@ -39,7 +40,7 @@ bot.on("message", async (msg) => {
           return;
         }
         fs.unlinkSync(tempPath);
-        bot.sendMessage(chatId, `✅ Uploaded ${count} codes.`);
+        bot.sendMessage(chatId, `✅ Uploaded ${count} valid codes.`);
       });
     });
     return;
@@ -50,49 +51,49 @@ bot.on("message", async (msg) => {
     try {
       await redis.set("test-key", "ok", { ex: 5 });
       const test = await redis.get("test-key");
-      bot.sendMessage(chatId, test === "ok" ? "✅ Redis is online." : "❌ Redis error.");
+      bot.sendMessage(chatId, test === "ok" ? "✅ Redis is online." : "❌ Redis failed.");
     } catch {
       bot.sendMessage(chatId, "❌ Redis unreachable.");
     }
     return;
   }
 
-  // 🔓 Dispense code
+  // 🎟️ Dispense code
   if (msg.text?.startsWith("/code")) {
     const args = msg.text.trim().split(" ");
     const mode = args[1]?.toLowerCase();
     if (!validPrefixes.includes(mode)) {
-      bot.sendMessage(chatId, "❌ Usage: /code v200 (or v500, v1000...)");
+      bot.sendMessage(chatId, "❌ Usage: /code v200 (or v500, v1000, etc)");
       return;
     }
 
     try {
-      const keys = await redis.scanIterator({ match: `${mode}-*`, count: 100 });
-      const unused = [];
+      const keys = redis.scanIterator({ match: `${mode}-*`, count: 100 });
+      const available = [];
+
       for await (const key of keys) {
         const val = await redis.get(key);
-        if (val) unused.push(key);
+        if (val) available.push(key);
       }
 
-      if (!unused.length) {
-        bot.sendMessage(chatId, "❌ No codes left for that mode.");
+      if (!available.length) {
+        bot.sendMessage(chatId, "❌ No codes available for that mode.");
         return;
       }
 
-      const code = unused[Math.floor(Math.random() * unused.length)];
-      await redis.del(code);
-      bot.sendMessage(chatId, `🎟️ Your unlock code: ${code}`);
-    } catch (e) {
-      console.error("❌ Code fetch error:", e);
-      bot.sendMessage(chatId, "❌ Failed to fetch code from Redis.");
+      const selected = available[Math.floor(Math.random() * available.length)];
+      await redis.del(selected);
+      bot.sendMessage(chatId, `🎟️ Your unlock code: ${selected}`);
+    } catch (err) {
+      console.error("❌ Error pulling code:", err);
+      bot.sendMessage(chatId, "❌ Failed to pull code from Redis.");
     }
     return;
   }
 
-  // ⚠️ Confirm-based CLEAR
+  // ⚠️ Clear all codes
   if (msg.text === "/clear-all") {
-    bot.sendMessage(chatId, "⚠️ This will delete ALL codes.\nType /confirm-clear within 10s to proceed.");
-
+    bot.sendMessage(chatId, "⚠️ Type /confirm-clear in 10s to delete ALL codes.");
     bot.once("message", async (m) => {
       if (m.text === "/confirm-clear" && m.chat.id === chatId) {
         let deleted = 0;
@@ -106,18 +107,17 @@ bot.on("message", async (msg) => {
           }
           bot.sendMessage(chatId, `✅ Deleted ${deleted} Redis codes.`);
         } catch (e) {
-          console.error("❌ Clear error:", e);
-          bot.sendMessage(chatId, "❌ Redis deletion failed.");
+          console.error("❌ Error deleting:", e);
+          bot.sendMessage(chatId, "❌ Failed to clear Redis.");
         }
-      } else {
-        bot.sendMessage(chatId, "❌ Clear cancelled.");
       }
     });
     return;
   }
 });
 
-// 🧩 Import helpers
+// ✅ HELPER FUNCTIONS
+
 function isValidCode(code) {
   const [prefix, suffix] = code.split("-");
   return validPrefixes.includes(prefix) && /^\d{6}$/.test(suffix);
@@ -131,7 +131,7 @@ async function saveCode(code) {
       return true;
     }
   } catch (e) {
-    console.error("Redis set error:", code, e);
+    console.error("Redis SET error:", code, e);
   }
   return false;
 }
@@ -179,9 +179,9 @@ async function insertFromJSON(path) {
       }
     }));
   } catch {
-    console.error("Invalid JSON");
+    console.error("Invalid JSON file");
   }
   return count;
 }
 
-console.log("🤖 Telegram bot initialized.");
+console.log("🤖 Telegram bot running and ready.");
