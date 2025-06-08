@@ -16,7 +16,10 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
 function readCodes() {
   if (!fs.existsSync(CODE_FILE)) return [];
-  return fs.readFileSync(CODE_FILE, "utf8").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  return fs.readFileSync(CODE_FILE, "utf8")
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean);
 }
 
 function writeCodes(codes) {
@@ -34,61 +37,65 @@ bot.on("message", async (msg) => {
 
   if (!text) return;
 
-  // 📦 /view remaining
+  // ✅ View remaining
   if (text === "/view") {
-    const all = readCodes();
-    const grouped = validPrefixes.map(p => `${p}: ${all.filter(c => c.startsWith(p)).length}`).join("\n");
-    bot.sendMessage(chatId, `📦 Remaining Codes:\n${grouped}`);
+    const codes = readCodes();
+    const countByPrefix = validPrefixes.map(p => `${p}: ${codes.filter(c => c.startsWith(p)).length}`).join("\n");
+    bot.sendMessage(chatId, `📦 Remaining Codes:\n${countByPrefix}`);
     return;
   }
 
-  // ➕ /add codes
+  // ✅ Add codes (bulk multi-line)
   if (text.startsWith("/add")) {
-    const codes = text.split("\n").slice(1).map(l => l.trim()).filter(isValidCode);
-    if (!codes.length) return bot.sendMessage(chatId, "❌ Invalid format. Use:\n/add\nv200-123456");
+    const lines = text.split("\n").slice(1);
+    const newCodes = lines.map(l => l.trim()).filter(isValidCode);
 
-    const existing = new Set(readCodes());
-    const newOnes = codes.filter(c => !existing.has(c));
-    if (newOnes.length) {
-      fs.appendFileSync(CODE_FILE, "\n" + newOnes.join("\n"));
+    if (newCodes.length === 0) {
+      return bot.sendMessage(chatId, "❌ Invalid format. Use:\n/add\nv200-xxxxxx\nv500-xxxxxx");
     }
 
-    bot.sendMessage(chatId, `✅ Added ${newOnes.length} codes.`);
+    const existing = new Set(readCodes());
+    const filtered = newCodes.filter(code => !existing.has(code));
+
+    if (filtered.length > 0) {
+      fs.appendFileSync(CODE_FILE, "\n" + filtered.join("\n"));
+    }
+
+    bot.sendMessage(chatId, `✅ Added ${filtered.length} new codes.`);
     return;
   }
 
-  // 🎟️ /code <mode>
+  // ✅ Generate code
   if (text.startsWith("/code")) {
     const parts = text.split(" ");
     const mode = parts[1]?.toLowerCase();
 
     if (!validPrefixes.includes(mode)) {
-      bot.sendMessage(chatId, "❌ Usage: /code v200 (or v500, v1000, etc)");
-      return;
+      return bot.sendMessage(chatId, "❌ Usage: /code v200 (or v500, v1000, etc)");
     }
 
     try {
       const used = new Set();
       const scan = redis.scanIterator({ match: `${mode}-*`, count: 100 });
-      for await (const k of scan) used.add(k);
+      for await (const key of scan) used.add(key);
 
-      let all = readCodes();
-      const unused = all.filter(code => code.startsWith(mode) && !used.has(code));
+      const all = readCodes();
+      const available = all.filter(code => code.startsWith(mode) && !used.has(code));
 
-      if (!unused.length) {
-        bot.sendMessage(chatId, `❌ No unused ${mode} codes found.`);
-        return;
+      if (available.length === 0) {
+        return bot.sendMessage(chatId, `❌ No unused ${mode} codes found.`);
       }
 
-      const selected = unused[Math.floor(Math.random() * unused.length)];
+      const selected = available[Math.floor(Math.random() * available.length)];
       await redis.set(selected, true);
 
-      all = all.filter(c => c !== selected);
-      writeCodes(all);
+      // Remove used code from file
+      const updated = all.filter(c => c !== selected);
+      writeCodes(updated);
 
       bot.sendMessage(chatId, `🎟️ Your unlock code: ${selected}`);
-    } catch (e) {
-      console.error("Redis error:", e);
+    } catch (err) {
+      console.error(err);
       bot.sendMessage(chatId, "❌ Failed to pull code.");
     }
 
@@ -96,4 +103,4 @@ bot.on("message", async (msg) => {
   }
 });
 
-console.log("🤖 Telegram bot is running.");
+console.log("🤖 Telegram Bot Running");
