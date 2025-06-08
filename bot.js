@@ -4,68 +4,81 @@ import csvParser from "csv-parser";
 import fs from "fs";
 import https from "https";
 
-// 🚨 Replace with your environment variable if not using Railway ENV directly
+// === Configuration ===
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
 
+const allowedUsers = [6630390831]; // Replace with your Telegram user ID
+const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"];
+const confirmMap = new Map(); // userId => timestamp
+
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
-const allowedUsers = [6630390831]; // Replace with your actual Telegram user ID
-const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"];
-const clearConfirmations = new Set();
-
+// === File Upload Handling ===
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
+  // Handle file uploads
   if (msg.document) {
     const fileName = msg.document.file_name;
     const fileId = msg.document.file_id;
     const ext = fileName.split(".").pop();
 
     if (!["csv", "txt", "json"].includes(ext)) {
-      return bot.sendMessage(chatId, "⚠️ Only CSV, TXT, or JSON files are supported.");
+      return bot.sendMessage(chatId, "⚠️ Only .csv, .txt, or .json files are supported.");
     }
 
     const file = await bot.getFile(fileId);
     const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file.file_path}`;
     const tempPath = `./temp-${Date.now()}.${ext}`;
-    const fileStream = fs.createWriteStream(tempPath);
 
+    const stream = fs.createWriteStream(tempPath);
     https.get(fileUrl, (res) => {
-      res.pipe(fileStream);
-      fileStream.on("finish", async () => {
-        fileStream.close();
-
+      res.pipe(stream);
+      stream.on("finish", async () => {
+        stream.close();
         let inserted = 0;
-        if (ext === "csv") {
-          inserted = await insertFromCSV(tempPath);
-        } else if (ext === "txt") {
-          inserted = await insertFromTXT(tempPath);
-        } else if (ext === "json") {
-          inserted = await insertFromJSON(tempPath);
-        }
+
+        if (ext === "csv") inserted = await insertFromCSV(tempPath);
+        else if (ext === "txt") inserted = await insertFromTXT(tempPath);
+        else if (ext === "json") inserted = await insertFromJSON(tempPath);
 
         fs.unlinkSync(tempPath);
-        bot.sendMessage(chatId, `✅ Upload complete: ${inserted} valid codes added.`);
+        bot.sendMessage(chatId, `✅ Done! ${inserted} valid codes added.`);
       });
     });
   }
 });
 
-// 🧹 /clear command with confirmation
+// === /clear command ===
 bot.onText(/\/clear/, async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
   if (!allowedUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "⛔ You are not authorized to perform this action.");
+    return bot.sendMessage(chatId, "⛔ You are not authorized to clear codes.");
   }
 
-  if (clearConfirmations.has(userId)) {
+  confirmMap.set(userId, Date.now());
+  bot.sendMessage(chatId, "⚠️ Are you sure you want to delete ALL unlock codes from Redis?\nReply with `/confirm` within 60 seconds to proceed.");
+});
+
+// === /confirm command ===
+bot.onText(/\/confirm/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const timestamp = confirmMap.get(userId);
+
+  if (!timestamp || Date.now() - timestamp > 60000) {
+    return bot.sendMessage(chatId, "❌ Confirmation expired or not initiated. Send /clear again.");
+  }
+
+  confirmMap.delete(userId);
+  try {
     let deleted = 0;
     for (const prefix of validPrefixes) {
       const keys = await redis.keys(`${prefix}-*`);
@@ -74,15 +87,22 @@ bot.onText(/\/clear/, async (msg) => {
         deleted++;
       }
     }
-    clearConfirmations.delete(userId);
-    return bot.sendMessage(chatId, `🗑️ Deleted ${deleted} unlock codes.`);
-  } else {
-    clearConfirmations.add(userId);
-    return bot.sendMessage(chatId, "⚠️ Confirm deletion by sending /clear again.");
+    bot.sendMessage(chatId, `🧹 Success! ${deleted} codes were deleted.`);
+  } catch (err) {
+    console.error("Redis deletion error:", err);
+    bot.sendMessage(chatId, "❌ Failed to clear codes.");
   }
 });
 
-// 📦 File processors
+// === Code Validators ===
+async function isValidCode(code) {
+  const [prefix, suffix] = code.split("-");
+  if (!validPrefixes.includes(prefix) || !suffix || suffix.length !== 6) return false;
+  const exists = await redis.get(code);
+  return !exists;
+}
+
+// === Insert from file formats ===
 async function insertFromCSV(filePath) {
   return new Promise((resolve) => {
     let count = 0;
@@ -103,7 +123,7 @@ async function insertFromTXT(filePath) {
   const lines = fs.readFileSync(filePath, "utf-8").split(/\r?\n/);
   let count = 0;
   for (const line of lines) {
-    const code = line.toLowerCase().trim();
+    const code = line.trim().toLowerCase();
     if (await isValidCode(code)) {
       await redis.set(code, true);
       count++;
@@ -113,23 +133,15 @@ async function insertFromTXT(filePath) {
 }
 
 async function insertFromJSON(filePath) {
-  const content = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  const json = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  const codes = Array.isArray(json) ? json : Object.values(json);
   let count = 0;
-  const codes = Array.isArray(content) ? content : Object.values(content);
   for (const raw of codes) {
-    const code = raw.toLowerCase().trim();
+    const code = raw?.toString().trim().toLowerCase();
     if (await isValidCode(code)) {
       await redis.set(code, true);
       count++;
     }
   }
   return count;
-}
-
-// 🔍 Code validator
-async function isValidCode(code) {
-  const [prefix, suffix] = code.split("-");
-  if (!validPrefixes.includes(prefix) || suffix?.length !== 6) return false;
-  const exists = await redis.get(code);
-  return !exists;
 }
