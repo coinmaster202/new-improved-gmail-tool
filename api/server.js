@@ -21,9 +21,11 @@ app.get("/", (req, res) => {
 // API routes
 import verifyCodeRoute from "./verify-code.js";
 import sendTelegramRoute from "./send-telegram.js";
+import runTestRedis from "./run-test-redis.js"; // ✅ Import test route
 
 app.use("/api/verify-code", verifyCodeRoute);
 app.use("/api/send-telegram", sendTelegramRoute);
+app.get("/api/test-redis", runTestRedis); // ✅ Add test route
 
 // ✅ Start Telegram code listener (runs in background)
 import "./telegram-listener.js";
