@@ -6,25 +6,29 @@ const redis = new Redis({
 });
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+  if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
 
   const { code } = req.body;
   if (!code || typeof code !== "string" || !code.includes("-")) {
-    return res.status(400).json({ error: "Invalid code" });
+    return res.status(400).json({ error: "Invalid code format" });
   }
 
   const [prefix, suffix] = code.toLowerCase().split("-");
   const limits = { v200: 200, v500: 500, v1000: 1000, v5000: 5000, unlimt: Infinity };
 
+  // ✅ Validate structure only — DO NOT allow if not in Redis
   if (!limits[prefix] || suffix.length !== 6) {
     return res.status(400).json({ error: "Invalid format or code" });
   }
 
   try {
     const exists = await redis.get(code);
-    if (exists) return res.status(403).json({ error: "Code already used" });
 
-    await redis.set(code, true);
+    if (!exists) {
+      return res.status(403).json({ error: "Code not found or already used" });
+    }
+
+    await redis.del(code); // 🔒 Ensure one-time use
     return res.status(200).json({ max: limits[prefix] });
   } catch (e) {
     console.error("Redis error:", e);
