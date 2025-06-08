@@ -13,21 +13,21 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Invalid code format" });
   }
 
-  const [prefix, suffix] = code.toLowerCase().split("-");
+  const redisKey = code.toLowerCase();
+  const [prefix, suffix] = redisKey.split("-");
   const limits = { v200: 200, v500: 500, v1000: 1000, v5000: 5000, unlimt: Infinity };
 
-  // ✅ Accept valid modes and exactly 6 characters (numbers or letters)
-  if (!limits[prefix] || !/^[a-z0-9]{6}$/i.test(suffix)) {
+  if (!limits[prefix] || !/^[a-z0-9]{6}$/.test(suffix)) {
     return res.status(400).json({ error: "Invalid format or code" });
   }
 
   try {
-    const exists = await redis.get(code);
+    const exists = await redis.get(redisKey);
     if (!exists) {
       return res.status(403).json({ error: "Code not found or already used" });
     }
 
-    await redis.del(code); // ✅ Mark as used
+    await redis.del(redisKey); // ✅ Mark as used
     return res.status(200).json({ max: limits[prefix] });
   } catch (e) {
     console.error("Redis error:", e);
