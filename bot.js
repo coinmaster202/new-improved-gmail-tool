@@ -4,7 +4,6 @@ import https from "https";
 import fs from "fs";
 import csvParser from "csv-parser";
 
-// Load environment variables (used automatically in Railway)
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
@@ -17,7 +16,6 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
 
-  // --- Handle file uploads (admin) ---
   if (msg.document) {
     const fileId = msg.document.file_id;
     const fileName = msg.document.file_name.toLowerCase();
@@ -49,7 +47,6 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  // --- Clear all codes with /clear and /confirm (admin) ---
   if (msg.text && msg.text.startsWith("/clear")) {
     bot.sendMessage(chatId, "⚠️ Send /confirm within 15 seconds to clear ALL unlock codes from Redis.");
     bot.once("message", async (m) => {
@@ -72,7 +69,6 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  // --- Ping Redis with /ping ---
   if (msg.text && msg.text === "/ping") {
     try {
       await redis.set("test-key", "ok", { ex: 5 });
@@ -84,7 +80,6 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  // --- Dispense unlock codes with /code v200 (or v500, v1000, etc) ---
   if (msg.text && msg.text.startsWith("/code")) {
     const args = msg.text.trim().split(" ");
     const mode = args[1] ? args[1].toLowerCase() : null;
@@ -96,15 +91,16 @@ bot.on("message", async (msg) => {
 
     try {
       const keys = await redis.keys(`${mode}-*`);
-      console.log(`🔍 Redis keys for ${mode}-*:`, keys);
+      console.log(`🔍 Keys matching ${mode}-*:`, keys);
 
       const unused = [];
       for (const key of keys) {
         const val = await redis.get(key);
-        if (val) unused.push(key);
+        console.log(`🔎 Check key: ${key} →`, val);
+        if (val === true || val === "true") unused.push(key);
       }
 
-      console.log("✅ Unused codes available:", unused);
+      console.log("✅ Unused codes:", unused);
 
       if (unused.length === 0) {
         bot.sendMessage(chatId, "❌ No codes left for that mode.");
@@ -113,8 +109,8 @@ bot.on("message", async (msg) => {
 
       const code = unused[Math.floor(Math.random() * unused.length)];
       console.log("🎟️ Dispensing code:", code);
-
       await redis.del(code);
+
       bot.sendMessage(chatId, `🎟️ Your unlock code: ${code}`);
     } catch (err) {
       console.error("❌ ERROR while fetching Redis codes:", err);
@@ -124,7 +120,25 @@ bot.on("message", async (msg) => {
   }
 });
 
-// --- Helpers for admin file import ---
+// --- Helpers ---
+function isValidCode(code) {
+  const [prefix, suffix] = code.split("-");
+  return validPrefixes.includes(prefix) && /^\d{6}$/.test(suffix);
+}
+
+async function saveCode(code) {
+  try {
+    const exists = await redis.get(code);
+    if (!exists) {
+      await redis.set(code, true);
+      return true;
+    }
+  } catch (e) {
+    console.error("Redis set error:", code, e);
+  }
+  return false;
+}
+
 async function insertFromCSV(path) {
   return new Promise((resolve) => {
     let count = 0;
@@ -175,24 +189,6 @@ async function insertFromJSON(path) {
   }
   await Promise.all(pending);
   return count;
-}
-
-function isValidCode(code) {
-  const [prefix, suffix] = code.split("-");
-  return validPrefixes.includes(prefix) && /^\d{6}$/.test(suffix);
-}
-
-async function saveCode(code) {
-  try {
-    const exists = await redis.get(code);
-    if (!exists) {
-      await redis.set(code, true);
-      return true;
-    }
-  } catch (e) {
-    console.error("Redis set error:", code, e);
-  }
-  return false;
 }
 
 console.log("🤖 Telegram bot listener initialized.");
