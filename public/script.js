@@ -5,7 +5,7 @@ let latestVariations = [];
 // 🔓 Request unlock code via Telegram
 function requestCode(prefix) {
   requestedPrefix = prefix;
-  const randomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const randomId = Math.floor(100000 + Math.random() * 900000).toString(); // ✅ 6-digit numeric code
   const timestamp = new Date().toLocaleString();
 
   fetch("https://api.ipify.org?format=json")
