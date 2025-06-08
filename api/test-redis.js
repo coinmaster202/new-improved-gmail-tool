@@ -6,18 +6,31 @@ const redis = new Redis({
 });
 
 export default async function handler(req, res) {
-  const code = "v500-123456";
+  const prefix = "v500";
+  const insertedKey = `${prefix}-123456`;
 
   try {
-    await redis.set(code, true);
-    const value = await redis.get(code);
+    // Insert a test key
+    await redis.set(insertedKey, true);
+
+    // Fetch matching keys
+    const keys = await redis.keys(`${prefix}-*`);
+    const result = [];
+
+    for (const key of keys) {
+      const val = await redis.get(key);
+      result.push({ key, value: val });
+    }
+
     return res.status(200).json({
-      message: `✅ Code inserted: ${code}`,
-      value,
+      message: `✅ Test key inserted: ${insertedKey}`,
+      keysMatched: keys.length,
+      entries: result,
     });
   } catch (e) {
+    console.error("❌ Redis error:", e);
     return res.status(500).json({
-      error: "❌ Redis insert failed",
+      error: "❌ Redis test failed",
       details: e.message,
     });
   }
