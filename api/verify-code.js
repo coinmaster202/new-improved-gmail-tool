@@ -27,7 +27,7 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: "Code not found or already used" });
     }
 
-    await redis.del(redisKey); // ✅ Mark as used
+    await redis.del(redisKey); // Mark as used
     return res.status(200).json({ max: limits[prefix] });
   } catch (e) {
     console.error("Redis error:", e);
