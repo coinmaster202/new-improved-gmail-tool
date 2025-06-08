@@ -86,7 +86,7 @@ bot.on("message", async (msg) => {
 
   // --- Dispense unlock codes with /code v200 (or v500, v1000, etc) ---
   if (msg.text && msg.text.startsWith("/code")) {
-    const args = msg.text.split(" ");
+    const args = msg.text.trim().split(" ");
     const mode = args[1] ? args[1].toLowerCase() : null;
 
     if (!validPrefixes.includes(mode)) {
@@ -96,20 +96,28 @@ bot.on("message", async (msg) => {
 
     try {
       const keys = await redis.keys(`${mode}-*`);
+      console.log(`🔍 Redis keys for ${mode}-*:`, keys);
+
       const unused = [];
       for (const key of keys) {
         const val = await redis.get(key);
         if (val) unused.push(key);
       }
+
+      console.log("✅ Unused codes available:", unused);
+
       if (unused.length === 0) {
         bot.sendMessage(chatId, "❌ No codes left for that mode.");
         return;
       }
+
       const code = unused[Math.floor(Math.random() * unused.length)];
-      await redis.del(code); // Mark as used
+      console.log("🎟️ Dispensing code:", code);
+
+      await redis.del(code);
       bot.sendMessage(chatId, `🎟️ Your unlock code: ${code}`);
     } catch (err) {
-      console.error(err);
+      console.error("❌ ERROR while fetching Redis codes:", err);
       bot.sendMessage(chatId, "❌ Failed to fetch code from Redis.");
     }
     return;
@@ -178,7 +186,7 @@ async function saveCode(code) {
   try {
     const exists = await redis.get(code);
     if (!exists) {
-      await redis.set(code, true); // Value doesn't matter, only existence
+      await redis.set(code, true);
       return true;
     }
   } catch (e) {
