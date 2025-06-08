@@ -1,60 +1,117 @@
-// bot.js import TelegramBot from "node-telegram-bot-api"; import { Redis } from "@upstash/redis"; import fs from "fs";
+import TelegramBot from "node-telegram-bot-api";
+import { Redis } from "@upstash/redis";
+import fs from "fs";
+import path from "path";
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; const redis = new Redis({ url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN, });
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
-const CODE_FILE = "code.txt"; const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"]; const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+const CODE_FILE = path.join(process.cwd(), "code.txt");
+const validPrefixes = ["v200", "v500", "v1000", "v5000", "unlimt"];
+const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
-bot.on("message", async (msg) => { const chatId = msg.chat.id; const text = msg.text?.trim();
-
-if (!text) return;
-
-// /ping if (text === "/ping") { try { await redis.set("test-key", "ok", { ex: 5 }); const result = await redis.get("test-key"); bot.sendMessage(chatId, result === "ok" ? "✅ Redis is online." : "❌ Redis error."); } catch { bot.sendMessage(chatId, "❌ Redis unreachable."); } return; }
-
-// /view if (text === "/view") { const lines = fs.readFileSync(CODE_FILE, "utf8").split(/\r?\n/).filter(Boolean); const counts = Object.fromEntries(validPrefixes.map(p => [p, 0])); for (const line of lines) { const prefix = line.split("-")[0]; if (validPrefixes.includes(prefix)) counts[prefix]++; } const message = 🚚 Remaining Codes:\n + Object.entries(counts).map(([k, v]) => ${k}: ${v}).join("\n"); bot.sendMessage(chatId, message); return; }
-
-// /code <prefix> if (text.startsWith("/code")) { const parts = text.split(" "); const prefix = parts[1]?.toLowerCase();
-
-if (!validPrefixes.includes(prefix)) {
-  bot.sendMessage(chatId, "❌ Usage: /code v200 (or v500, v1000, etc)");
-  return;
+// 📥 Load all codes from code.txt
+function loadCodes() {
+  if (!fs.existsSync(CODE_FILE)) return [];
+  return fs
+    .readFileSync(CODE_FILE, "utf8")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
 }
 
-try {
-  const lines = fs.readFileSync(CODE_FILE, "utf8").split(/\r?\n/).filter(Boolean);
-  const available = lines.filter(l => l.startsWith(prefix));
-  if (available.length === 0) {
-    bot.sendMessage(chatId, `❌ No unused ${prefix} codes found.`);
+// 💾 Save codes back to code.txt
+function saveCodes(codes) {
+  fs.writeFileSync(CODE_FILE, codes.join("\n") + "\n", "utf8");
+}
+
+// ➕ Add new codes
+function addCodes(newCodes) {
+  const current = new Set(loadCodes());
+  let added = 0;
+  for (const code of newCodes) {
+    if (
+      typeof code === "string" &&
+      /^[a-z0-9]+-\d{6}$/i.test(code) &&
+      !current.has(code)
+    ) {
+      current.add(code);
+      added++;
+    }
+  }
+  saveCodes([...current]);
+  return added;
+}
+
+// 🎯 Dispense one code
+async function getCode(mode) {
+  const all = loadCodes();
+  const available = all.filter(code => code.startsWith(mode + "-"));
+  for (const code of available) {
+    const used = await redis.get(code);
+    if (!used) {
+      await redis.set(code, true);
+      saveCodes(all.filter(c => c !== code)); // remove from file
+      return code;
+    }
+  }
+  return null;
+}
+
+// 🤖 Bot commands
+bot.on("message", async msg => {
+  const chatId = msg.chat.id;
+  const text = msg.text?.trim();
+
+  if (text === "/ping") {
+    try {
+      await redis.set("ping-test", "ok", { ex: 5 });
+      const res = await redis.get("ping-test");
+      bot.sendMessage(chatId, res === "ok" ? "✅ Redis is online." : "❌ Redis error.");
+    } catch {
+      bot.sendMessage(chatId, "❌ Redis failed.");
+    }
     return;
   }
 
-  const code = available[0];
-  const updated = lines.filter(l => l !== code);
-  fs.writeFileSync(CODE_FILE, updated.join("\n"));
-  await redis.set(code, true);
-  bot.sendMessage(chatId, `🎟️ Your unlock code: ${code}`);
-} catch (e) {
-  console.error("Code pull error:", e);
-  bot.sendMessage(chatId, "❌ Failed to pull code.");
-}
-return;
-
-}
-
-// /add multiline if (text.startsWith("/add")) { const rawLines = text.split("\n").slice(1).map(l => l.trim().toLowerCase()).filter(Boolean); let added = 0; const existing = fs.readFileSync(CODE_FILE, "utf8").split(/\r?\n/).filter(Boolean); const combined = new Set(existing);
-
-for (const line of rawLines) {
-  const [prefix, suffix] = line.split("-");
-  if (validPrefixes.includes(prefix) && /^[0-9a-z]{6,}$/.test(suffix) && !combined.has(line)) {
-    combined.add(line);
-    added++;
+  if (text === "/view") {
+    const all = loadCodes();
+    const counts = {};
+    for (const prefix of validPrefixes) {
+      counts[prefix] = all.filter(c => c.startsWith(prefix + "-")).length;
+    }
+    const summary = Object.entries(counts)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\n");
+    bot.sendMessage(chatId, `📦 Remaining Codes:\n${summary}`);
+    return;
   }
-}
 
-fs.writeFileSync(CODE_FILE, Array.from(combined).join("\n"));
-bot.sendMessage(chatId, `✅ Added ${added} new codes.`);
-return;
+  if (text?.startsWith("/code ")) {
+    const mode = text.split(" ")[1].toLowerCase();
+    if (!validPrefixes.includes(mode)) {
+      bot.sendMessage(chatId, "❌ Usage: /code v200 (or v500, v1000, etc)");
+      return;
+    }
+    const code = await getCode(mode);
+    if (!code) {
+      bot.sendMessage(chatId, `❌ No unused ${mode} codes found.`);
+    } else {
+      bot.sendMessage(chatId, `🎟️ Your unlock code: ${code}`);
+    }
+    return;
+  }
 
-} });
+  if (text?.startsWith("/add")) {
+    const pasted = text.replace("/add", "").trim();
+    const lines = pasted.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const added = addCodes(lines);
+    bot.sendMessage(chatId, `✅ Added ${added} new codes.`);
+    return;
+  }
+});
 
-console.log("🤖 Telegram bot running...");
-
+console.log("🤖 Telegram bot ready!");
