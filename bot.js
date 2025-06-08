@@ -17,6 +17,7 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
 
+  // --- Handle file uploads (admin) ---
   if (msg.document) {
     const fileId = msg.document.file_id;
     const fileName = msg.document.file_name.toLowerCase();
@@ -45,7 +46,11 @@ bot.on("message", async (msg) => {
         bot.sendMessage(chatId, `✅ Done! ${count} new unlock codes added.`);
       });
     });
-  } else if (msg.text && msg.text.startsWith("/clear")) {
+    return;
+  }
+
+  // --- Clear all codes with /clear and /confirm (admin) ---
+  if (msg.text && msg.text.startsWith("/clear")) {
     bot.sendMessage(chatId, "⚠️ Send /confirm within 15 seconds to clear ALL unlock codes from Redis.");
     bot.once("message", async (m) => {
       if (m.text === "/confirm" && m.chat.id === chatId) {
@@ -64,7 +69,11 @@ bot.on("message", async (msg) => {
         }
       }
     });
-  } else if (msg.text && msg.text === "/ping") {
+    return;
+  }
+
+  // --- Ping Redis with /ping ---
+  if (msg.text && msg.text === "/ping") {
     try {
       await redis.set("test-key", "ok", { ex: 5 });
       const check = await redis.get("test-key");
@@ -72,53 +81,91 @@ bot.on("message", async (msg) => {
     } catch {
       bot.sendMessage(chatId, "❌ Redis unreachable.");
     }
+    return;
+  }
+
+  // --- Dispense unlock codes with /code v200 (or v500, v1000, etc) ---
+  if (msg.text && msg.text.startsWith("/code")) {
+    const args = msg.text.split(" ");
+    const mode = args[1] ? args[1].toLowerCase() : null;
+
+    if (!validPrefixes.includes(mode)) {
+      bot.sendMessage(chatId, "❌ Usage: /code v200 (or v500, v1000, v5000, unlimt)");
+      return;
+    }
+
+    try {
+      const keys = await redis.keys(`${mode}-*`);
+      const unused = [];
+      for (const key of keys) {
+        const val = await redis.get(key);
+        if (val) unused.push(key);
+      }
+      if (unused.length === 0) {
+        bot.sendMessage(chatId, "❌ No codes left for that mode.");
+        return;
+      }
+      const code = unused[Math.floor(Math.random() * unused.length)];
+      await redis.del(code); // Mark as used
+      bot.sendMessage(chatId, `🎟️ Your unlock code: ${code}`);
+    } catch (err) {
+      console.error(err);
+      bot.sendMessage(chatId, "❌ Failed to fetch code from Redis.");
+    }
+    return;
   }
 });
 
+// --- Helpers for admin file import ---
 async function insertFromCSV(path) {
   return new Promise((resolve) => {
     let count = 0;
+    const pending = [];
     fs.createReadStream(path)
       .pipe(csvParser({ headers: false }))
-      .on("data", async (row) => {
+      .on("data", (row) => {
         const line = Object.values(row).join(",").toLowerCase().trim();
         if (isValidCode(line)) {
-          const added = await saveCode(line);
-          if (added) count++;
+          pending.push(saveCode(line).then((added) => { if (added) count++; }));
         }
       })
-      .on("end", () => resolve(count));
+      .on("end", async () => {
+        await Promise.all(pending);
+        resolve(count);
+      });
   });
 }
 
 async function insertFromText(path) {
   let count = 0;
   const lines = fs.readFileSync(path, "utf8").split(/\r?\n/);
+  const pending = [];
   for (const line of lines) {
     const code = line.toLowerCase().trim();
     if (isValidCode(code)) {
-      const added = await saveCode(code);
-      if (added) count++;
+      pending.push(saveCode(code).then((added) => { if (added) count++; }));
     }
   }
+  await Promise.all(pending);
   return count;
 }
 
 async function insertFromJSON(path) {
   let count = 0;
+  const pending = [];
   try {
     const data = JSON.parse(fs.readFileSync(path, "utf8"));
     const codes = Array.isArray(data) ? data : Object.values(data);
     for (const item of codes) {
       const code = typeof item === "string" ? item.toLowerCase().trim() : "";
       if (isValidCode(code)) {
-        const added = await saveCode(code);
-        if (added) count++;
+        pending.push(saveCode(code).then((added) => { if (added) count++; }));
       }
     }
   } catch (e) {
     console.error("Invalid JSON file.");
   }
+  await Promise.all(pending);
   return count;
 }
 
@@ -131,7 +178,7 @@ async function saveCode(code) {
   try {
     const exists = await redis.get(code);
     if (!exists) {
-      await redis.set(code, true);
+      await redis.set(code, true); // Value doesn't matter, only existence
       return true;
     }
   } catch (e) {
@@ -139,3 +186,5 @@ async function saveCode(code) {
   }
   return false;
 }
+
+console.log("🤖 Telegram bot listener initialized.");
