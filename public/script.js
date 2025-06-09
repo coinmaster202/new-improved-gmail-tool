@@ -1,3 +1,4 @@
+
 let requestedPrefix = "";
 let variationLimit = Infinity;
 let latestVariations = [];
@@ -55,7 +56,7 @@ document.querySelectorAll('.tab').forEach(tab => {
   };
 });
 
-// 🧠 Gmail dot variation generator
+// ✅ Optimized Gmail dot variation generator (from Script 1)
 document.getElementById("gmail-base").addEventListener("input", () => {
   const input = document.getElementById("gmail-base").value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!input) {
@@ -69,24 +70,22 @@ document.getElementById("gmail-base").addEventListener("input", () => {
   const limit = Math.min(total, variationLimit || Infinity);
   document.getElementById("variation-count").textContent = `Possibilities: ${limit}`;
 
-  const emails = new Set();
+  const emails = [];
   let count = 0;
+
   for (let i = 1; i < total && count < limit; i++) {
-    let combo = "";
+    let result = "";
     for (let j = 0; j < input.length; j++) {
-      combo += input[j];
+      result += input[j];
       if (j < input.length - 1 && (i & (1 << (input.length - 2 - j)))) {
-        combo += ".";
+        result += ".";
       }
     }
-    const email = combo + "@gmail.com";
-    if (!emails.has(email)) {
-      emails.add(email);
-      count++;
-    }
+    emails.push(result + "@gmail.com");
+    count++;
   }
 
-  latestVariations = Array.from(emails);
+  latestVariations = emails;
   document.getElementById("variation-list").innerHTML = latestVariations.map(e => `<li>${e}</li>`).join("");
 });
 
