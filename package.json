@@ -2,7 +2,6 @@
   "name": "new-improved-gmail-tool",
   "version": "1.0.0",
   "type": "module",
-  "main": "api/index.js",
   "scripts": {
     "start": "node api/server.js",
     "test-redis": "node public/test-redis.js"
